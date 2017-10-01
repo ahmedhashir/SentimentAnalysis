@@ -4,6 +4,20 @@ library(janeaustenr)
 library(wordcloud)
 library(reshape2)
 
+text <- c("Because I could not stop for Death -",
+          "He kindly stopped for me -",
+          "The Carriage held but just Ourselves -",
+          "and Immortality")
+
+text
+
+text_df <- data_frame(line = 1:4, text = text)
+
+text_df
+
+text_df %>%
+  unnest_tokens(word, text)
+
 original_books <- austen_books() %>%
   group_by(book) %>%
   mutate(linenumber = row_number(),
@@ -25,6 +39,15 @@ cleaned_books <- tidy_books %>%
 
 cleaned_books %>%
   count(word, sort = TRUE) 
+
+cleaned_books %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 600) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip()
 
 nrcjoy <- get_sentiments("nrc") %>%
   filter(sentiment == "joy")
