@@ -7,6 +7,7 @@ library(scales)
 library(purrr)
 library(broom)
 library(wordcloud)
+library(SnowballC)
 
 # Load @Delata tweets in a tibble
 deltaRaw <- read_csv("Data/delta.csv",col_names = c("num","timestamp","text"),
@@ -52,10 +53,18 @@ delta_sentiment <- delta %>%
   filter(!str_detect(word, "#") & !str_detect(word, "@")) %>% 
   count(word) %>%
   inner_join(get_sentiments("bing")) %>%
-  arrange(desc(n))
+  arrange(word)
 
+delta_stem_sentiment <- delta %>%
+  filter(!str_detect(word, "#") & !str_detect(word, "@")) %>% 
+  mutate(word = wordStem(word, language="english")) %>%
+  count(word) %>%
+  inner_join(get_sentiments("bing")) %>%
+  arrange(word)
+  
+  
 # Top 30 words by Negative and Positive sentiments
-delta_sentiment %>%
+delta_stem_sentiment %>%
   select(word, sentiment, n) %>%
   group_by(sentiment) %>%
   top_n(30) %>%
