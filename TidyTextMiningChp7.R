@@ -1,9 +1,12 @@
 # 7 Case study: comparing Twitter archives
 
+library(tidyverse)
+library(tidytext)
 library(lubridate)
-library(ggplot2)
-library(dplyr)
-library(readr)
+library(stringr)
+library(scales)
+library(purrr)
+library(broom)
 
 tweets_julia <- read_csv("Data/tweets_julia.csv")
 tweets_dave <- read_csv("Data/tweets_dave.csv")
@@ -74,3 +77,135 @@ word_ratios %>%
   coord_flip() +
   ylab("log odds ratio (David/Julia)") +
   scale_fill_discrete(name = "", labels = c("David", "Julia"))
+
+words_by_time <- tidy_tweets %>%
+  filter(!str_detect(word, "^@")) %>%
+  mutate(time_floor = floor_date(timestamp, unit = "1 month")) %>%
+  count(time_floor, person, word) %>%
+  ungroup() %>%
+  group_by(person, time_floor) %>%
+  mutate(time_total = sum(n)) %>%
+  group_by(word) %>%
+  mutate(word_total = sum(n)) %>%
+  ungroup() %>%
+  rename(count = n) %>%
+  filter(word_total > 30)
+
+words_by_time
+
+nested_data <- words_by_time %>%
+  nest(-word, -person) 
+
+nested_data
+
+nested_models <- nested_data %>%
+  mutate(models = map(data, ~ glm(cbind(count, time_total) ~ time_floor, ., 
+                                  family = "binomial")))
+
+nested_models
+
+slopes <- nested_models %>%
+  unnest(map(models, tidy)) %>%
+  filter(term == "time_floor") %>%
+  mutate(adjusted.p.value = p.adjust(p.value))
+
+top_slopes <- slopes %>% 
+  filter(adjusted.p.value < 0.1)
+
+top_slopes
+
+words_by_time %>%
+  inner_join(top_slopes, by = c("word", "person")) %>%
+  filter(person == "David") %>%
+  ggplot(aes(time_floor, count/time_total, color = word)) +
+  geom_line(size = 1.3) +
+  labs(x = NULL, y = "Word frequency")
+
+words_by_time %>%
+  inner_join(top_slopes, by = c("word", "person")) %>%
+  filter(person == "Julia") %>%
+  ggplot(aes(time_floor, count/time_total, color = word)) +
+  geom_line(size = 1.3) +
+  labs(x = NULL, y = "Word frequency")
+
+tweets_julia <- read_csv("data/juliasilge_tweets.csv")
+tweets_dave <- read_csv("data/drob_tweets.csv")
+tweets <- bind_rows(tweets_julia %>% 
+                      mutate(person = "Julia"),
+                    tweets_dave %>% 
+                      mutate(person = "David")) %>%
+  mutate(created_at = ymd_hms(created_at))
+
+tidy_tweets <- tweets %>% 
+  filter(!str_detect(text, "^(RT|@)")) %>%
+  mutate(text = str_replace_all(text, replace_reg, "")) %>%
+  unnest_tokens(word, text, token = "regex", pattern = unnest_reg) %>%
+  anti_join(stop_words)
+
+tidy_tweets
+
+totals <- tidy_tweets %>% 
+  group_by(person, id) %>% 
+  summarise(rts = sum(retweets)) %>% 
+  group_by(person) %>% 
+  summarise(total_rts = sum(rts))
+
+totals
+
+word_by_rts <- tidy_tweets %>% 
+  group_by(id, word, person) %>% 
+  summarise(rts = first(retweets)) %>% 
+  group_by(person, word) %>% 
+  summarise(retweets = median(rts), uses = n()) %>%
+  left_join(totals) %>%
+  filter(retweets != 0) %>%
+  ungroup()
+
+word_by_rts %>% 
+  filter(uses >= 5) %>%
+  arrange(desc(retweets))
+
+word_by_rts %>%
+  filter(uses >= 5) %>%
+  group_by(person) %>%
+  top_n(10, retweets) %>%
+  arrange(retweets) %>%
+  ungroup() %>%
+  mutate(word = factor(word, unique(word))) %>%
+  ungroup() %>%
+  ggplot(aes(word, retweets, fill = person)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ person, scales = "free", ncol = 2) +
+  coord_flip() +
+  labs(x = NULL, 
+       y = "Median # of retweets for tweets containing each word")
+
+totals <- tidy_tweets %>% 
+  group_by(person, id) %>% 
+  summarise(favs = sum(favorites)) %>% 
+  group_by(person) %>% 
+  summarise(total_favs = sum(favs))
+
+word_by_favs <- tidy_tweets %>% 
+  group_by(id, word, person) %>% 
+  summarise(favs = first(favorites)) %>% 
+  group_by(person, word) %>% 
+  summarise(favorites = median(favs), uses = n()) %>%
+  left_join(totals) %>%
+  filter(favorites != 0) %>%
+  ungroup()
+
+word_by_favs %>%
+  filter(uses >= 5) %>%
+  group_by(person) %>%
+  top_n(10, favorites) %>%
+  arrange(favorites) %>%
+  ungroup() %>%
+  mutate(word = factor(word, unique(word))) %>%
+  ungroup() %>%
+  ggplot(aes(word, favorites, fill = person)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ person, scales = "free", ncol = 2) +
+  coord_flip() +
+  labs(x = NULL, 
+       y = "Median # of favorites for tweets containing each word")
